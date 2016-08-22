@@ -1,0 +1,68 @@
+---
+title: "Wage Theft"
+author: "Jamaal Green"
+date: "August 16, 2016"
+output: html_document
+---
+Jeff Spross recently wrote a great [overview](http://theweek.com/articles/642568/biggest-crime-waves-america-isnt-what-think) of the wage theft in the US. Wage theft is ubiquitous and HUGE, costing low income workers [$20-50](http://www.epi.org/blog/new-legislation-could-help-end-wage-theft-epidemic/) [billion dollars](http://www.epi.org/publication/epidemic-wage-theft-costing-workers-hundreds/) annually. In terms of actually recovered funds, the Department of Labor in 2012 recovered nearly a billion dollars for low wage workers, and this is in an enforcement environment that is criminally underfunded (DOL has only had 1,000 enforcement agents since the 1980s). So, even in an underfunded environment, a weak DOL can still recover nearly a billion dollars in stolen wages. 
+
+The truth of the matter is, though, that we have little idea of the actual extent of wage theft, we just have a pretty good idea that it's everywhere and is primarily concentrated in low wage jobs. Spross cites a 2008 study by a collection of legendary labor researches (specifically Nik Theodore and Ruth Milkman) where they managed to survey over 4,700 low wage workers in [Chicago, NYC, and LA](http://www.unprotectedworkers.org/index.php/broken_laws/index) in order to get a better idea of the scale and scope of workplace violations. Their report, and some follow up papers, found that the majority of low wage workers suffered from some form of workplace illegal action such as not getting legally mandated breaks and meal time, non-payment of overtime or minimum wage, and retaliation for unionizing or simply complaining. Of those workers, nearly a quarter reported non-payment of minimum wage or off the clock violations.
+
+Academically, wage theft is a reasonably well studied topic but it is isolated primarily to legal research (whether wage theft laws work and some estimates of the scope of workplace violations) or some parts of labor relations (like the Theodore and Milkman survey). While the Theodore and Milkman survey are explicitly place based, there hasn't really been research looking at the **geography** of wage theft. In other words, what is the spatial distribution of wage theft and what can that spatial distribution tell us about who is at risk of having their wages stolen. A big reason why this may be the case has been the lack of cheaply available wage theft enforcement information. State labor departments often require a public records request, if they allow public review of enforcement data at all, and federal data has been hard to get-- until now. 
+
+The Department of Labor, as part of the federal government's open data push, has made their [enforcement data](http://ogesdw.dol.gov/views/data_catalogs.php) publicly available for a little while now. What makes this such a rich data set is it gives us a way to directly measure wage theft enforcement **at the establishment level** over space and time. Even recognizing the limits of federal enforcement data to give us an accurate estimate of overall wage theft, this data set offers analysts a rich opportunity to dive deeply into what we do know and to search for patterns. We already have a pretty good idea that major risk factors for wage theft include industrial structure, such as the extent to which contingent or part time workers are used or a subcontracting relationship, or worker characteristics, undocumented migrants or workers with weak English skills are particularly vulnerable, but it's unknown what spatial attributes matter in wage theft. Beyond that, it's unclear as to how wage theft may concentrate in particular spaces and places. Such understandings may offer advocates, academics, workers, and enforcement agents a better idea of where to focus their efforts. This blog is an initial cut at a spatial exploratory data analysis of the latest four years of the enforcement data at the county level.
+
+##Prepping the Data
+
+The Wage and Hour enforcement dataset comes in at a non-trivial 111MB with a couple hundred thousand rows and 110 columns. While not big by any reasonable measure this isn't a small dataset either. To make this a bit more tractable I'm going to pull out the latest four years data and focus primarily on Fair Labor Standards Act minimum wage and overtime violations. These are by far the most common violations and the ones people most intuitively understand. The dataset has man more FLSA violations in it, including farmworkers HB-2 related violations and any other illegal acts under FLSA. 
+
+I'm only interested in relatively recent patterns (though the data set has data going back to 1985 for longer analyses if you wish) so I will pull out all cases since 2012 and add a quarter date variable for easier graphing.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+#unzip and load enforcement file
+install.packages("pacman", repos='http://cran.us.r-project.org')
+library(pacman)
+p_load("lubridate", "stringr", "tidyr", "spdep","acs", "tigris", "ggplot2", "dplyr")
+temp <- unzip("whd_whisard_20160611.csv.zip")
+whd <- read.csv(temp, header = TRUE)
+
+#select case id, biznames, industry code, Fair Labor Standards Act min wage #and overtime violations and findings end date
+whd_sub <- whd %>% select(1:10, 21:22, 16)
+
+#create new date column from findings end date
+whd_sub$EndDate <- as_date(whd_sub$findings_end_date)
+
+#pull out all cases from 2012 onward
+whd_sub <- whd_sub %>% filter(EndDate > ymd(20120101)) %>%
+mutate(DateQuarter = quarter(EndDate, with_year = TRUE))
+
+whd_sub$DateQuarter <- as.factor(whd_sub$DateQuarter)
+
+whd_quarter <- whd_sub %>% group_by(st_cd, DateQuarter) %>%
+  summarise(mw_total = sum(flsa_mw_bw_atp_amt), ot_total = sum(flsa_ot_bw_atp_amt)) %>% filter(DateQuarter != "2024.2")
+
+whd_quarter <- whd_quarter %>% gather(violation, awarded_wages,3:4)
+
+whd_quarter$violation <- as.factor(whd_quarter$violation)
+
+whd_quarter$viol_labels <- NA
+whd_quarter$viol_labels[whd_quarter$violation == "mw_total"] <- "Min. Wage"
+
+whd_quarter$viol_labels[whd_quarter$violation == "ot_total"] <- "Overtime"
+```
+
+##First Cuts
+A first rough look at the data from the past four years already gives us an idea of the type of violations that are most often seen in the workplace-- overtime violations. Similar to what others saw low wage worker surveys folks' wages are generally stolen through uncompensated overtime and other off-the-clock violations and not necessarily through non-payment of minimum wage. Minimum wage violations clearly still occur ($12 million a year isn't chump change, especially if you have workers making around 20 or 30k a year).
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#graph of overtime violations nationally over time
+mw_by_quarter <- ggplot(whd_quarter, aes(x = DateQuarter, y = awarded_wages, fill = viol_labels)) + geom_bar(stat= "identity", position = "dodge") + theme(axis.text.x=element_text(angle=-45, hjust=0.001)) +
+  scale_y_continuous(labels = scales::dollar) +
+  labs(x = "Date", y = "Backpay Awarded", title = "Minimum Wage and Overtime\n Back Pay Awarded") +
+guides(fill = guide_legend(title = "Violation Type"))
+
+mw_by_quarter
+
+```
